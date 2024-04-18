@@ -1,4 +1,3 @@
-import React, { LinkHTMLAttributes } from 'react';
 import GithubLogo from '../assets/img/github-mark-white.svg';
 
 export const GithubLink = () => {
