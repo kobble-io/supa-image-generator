@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react';
 import { ImageCard } from '../components/ImageCard.tsx';
 import { LoadingFrame } from '../components/LoadingFrame.tsx';
 import { User } from '@kobbleio/react';
+import { GithubLink } from '../components/GithubLink.tsx';
 
 type ImageResult = { id: number; url: string };
 
@@ -74,10 +75,11 @@ const Home = () => {
 	return (
 		<div className="flex flex-col justify-between items-center w-full pb-20">
 			<SignedIn>
-				<header className={'fixed top-0 right-0 left-0 h-[50px] p-10 flex items-center justify-end'}>
+				<header className={'fixed top-0 right-0 left-0 h-[50px] p-10 flex items-center justify-end gap-2'}>
 					<LogoutButton>
 						<Button>Logout</Button>
 					</LogoutButton>
+					<GithubLink />
 				</header>
 				<main className="py-20">
 					<Heading />
@@ -113,6 +115,9 @@ const Home = () => {
 			</SignedIn>
 
 			<SignedOut>
+				<header className={'fixed top-0 right-0 left-0 h-[50px] p-10 flex items-center justify-end gap-2'}>
+					<GithubLink />
+				</header>
 				<main className="py-20">
 					<Heading />
 					<div className={'flex flex-col items-center justify-center gap-10'}>
