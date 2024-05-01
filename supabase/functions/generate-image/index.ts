@@ -1,15 +1,74 @@
 import 'https://deno.land/x/xhr@0.3.0/mod.ts';
 import axiod from 'https://deno.land/x/axiod/mod.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1';
-import { Kobble } from 'https://deno.land/x/kobble_admin@v1.4.8/index.ts';
+import { Kobble } from 'https://deno.land/x/kobble_admin@v2.0.0/index.ts';
+import { SupabaseClient } from '@supabase/supabase-js';
 
 /**
  * Required to call this functions from a browser.
  */
-export const corsHeaders = {
+const corsHeaders = {
 	'Access-Control-Allow-Origin': '*',
 	// Important: add kobble-authorization to the allowed headers.
 	'Access-Control-Allow-Headers': 'authorization, kobble-authorization, x-client-info, apikey, content-type'
+};
+
+const generateImage = async (prompt: string) => {
+	const apiKey = Deno.env.get('DEZGO_API_KEY');
+
+	if (!apiKey) {
+		throw new Error('DEZGO_API_KEY is not set. Please set it in your environment variables. You can get it from https://dezgo.com/');
+	}
+
+	const response = await axiod.post(
+		'https://api.dezgo.com/text2image',
+		{
+			prompt,
+			width: 320,
+			height: 320,
+			model: '0001softrealistic_v187'
+		},
+		{
+			responseType: 'arraybuffer',
+			headers: {
+				'x-dezgo-key': `${Deno.env.get('DEZGO_API_KEY')}`
+			}
+		}
+	);
+
+	return response.data as ArrayBuffer;
+};
+
+const persistImage = async (supabaseClient: SupabaseClient, imageBuffer: ArrayBuffer, userId: string) => {
+	const timestamp = +new Date();
+	const uploadName = `image-${timestamp}.png`;
+	const { error: uploadError } = await supabaseClient.storage.from('images').upload(uploadName, imageBuffer, {
+		contentType: 'image/png',
+		cacheControl: '3600',
+		upsert: false
+	});
+
+	if (uploadError) {
+		throw uploadError;
+	}
+
+	const tenYears = 60 * 60 * 24 * 365 * 10;
+	const { data: url } = await supabaseClient.storage.from('images').createSignedUrl(uploadName, tenYears);
+
+	if (!url) {
+		throw new Error('Image not found');
+	}
+
+	const { data: imageSaved } = await supabaseClient
+		.from('Images')
+		.insert({
+			user_id: userId,
+			url: url.signedUrl,
+			created_at: new Date().toISOString()
+		})
+		.select();
+
+	return imageSaved;
 };
 
 Deno.serve(async (req: Request) => {
@@ -33,73 +92,51 @@ Deno.serve(async (req: Request) => {
 	);
 
 	/**
+	 * Instantiate the Kobble admin SDK with the secret key
+	 * You can generate a secret key in the Kobble Admin Dashboard.
+	 */
+	const kobble = new Kobble(Deno.env.get('KOBBLE_SECRET_KEY')!);
+
+	/**
 	 * This header is passed from our frontend to authenticate the Kobble User.
 	 * It differs from the Supabase Token.
+	 * We could also use the Supabase token to authenticate the user but using Kobble is more convenient here.
 	 */
 	const Authorization = req.headers.get('Kobble-Authorization');
 	const token = Authorization?.split('Bearer ')[1];
 
-	/**
-	 * We use Kobble to verify the token and get the userId
-	 */
-	const kobble = new Kobble(Deno.env.get('KOBBLE_SECRET_KEY'));
 	const { userId } = await kobble.auth.verifyAccessToken(token!);
 
 	/**
-	 * We use Dezgo API to generate the image.
+	 * We use the Kobble SDK to verify that the user has remaining quota for
+	 * the image-generated feature based on their subscription.
+	 * If the user has no remaining quota, we return an error.
 	 */
-	const { prompt } = await req.json();
+	const hasRemainingQuota = await kobble.users.hasRemainingQuota(userId, 'image-generated');
 
-	const response = await axiod.post(
-		'https://api.dezgo.com/text2image',
-		{
-			prompt,
-			width: 320,
-			height: 320,
-			model: '0001softrealistic_v187'
-		},
-		{
-			responseType: 'arraybuffer',
+	if (!hasRemainingQuota) {
+		return new Response(JSON.stringify({ error: 'Quota exceeded' }), {
 			headers: {
-				'x-dezgo-key': `${Deno.env.get('DEZGO_API_KEY')}`
-			}
-		}
-	);
-
-	/**
-	 * Once we get the image, we upload it to Supabase Storage
-	 * and save the URL in the Images table.
-	 */
-	const imageBuffer = response.data as ArrayBuffer;
-	const timestamp = +new Date();
-	const uploadName = `image-${timestamp}.png`;
-	const { data: upload, error: uploadError } = await supabaseClient.storage.from('images').upload(uploadName, imageBuffer, {
-		contentType: 'image/png',
-		cacheControl: '3600',
-		upsert: false
-	});
-
-	if (uploadError) {
-		throw uploadError;
+				'Content-Type': 'application/json',
+				...corsHeaders
+			},
+			status: 403
+		});
 	}
 
-	const tenYears = 60 * 60 * 24 * 365 * 10;
-	const { data: url } = await supabaseClient.storage.from('images').createSignedUrl(uploadName, tenYears);
-
-	const { signedUrl } = url;
-
-	const { data: imageSaved } = await supabaseClient
-		.from('Images')
-		.insert({
-			user_id: userId,
-			url: signedUrl,
-			created_at: new Date().toISOString()
-		})
-		.select();
+	/**
+	 * We generate the image using the prompt passed in the request body.
+	 * Then we store it on supabase storage and database.
+	 */
+	const { prompt } = await req.json();
+	const imageBuffer = await generateImage(prompt);
+	const imageSaved = await persistImage(supabaseClient, imageBuffer, userId);
 
 	/**
-	 * Once the image is saved, we return the URL to the frontend.
+	 * Finally we increment the usage of the user for the image-generated feature.
 	 */
+	await kobble.users.incrementQuotaUsage(userId, 'image-generated');
+
 	return new Response(JSON.stringify(imageSaved), {
 		headers: {
 			'Content-Type': 'application/json',

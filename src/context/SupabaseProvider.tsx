@@ -9,8 +9,6 @@ export type SupabaseProviderProps = {
 };
 
 export const SupabaseProvider: FC<{ children: ReactNode } & SupabaseProviderProps> = ({ children, url, apiKey }) => {
-	console.log('URL:', url, apiKey);
-
 	const [client, setClient] = useState<SupabaseClient | null>(null);
 	const { kobble } = useKobble();
 

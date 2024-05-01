@@ -3,13 +3,15 @@ import DemoImage from '../assets/img/demo-image.jpeg';
 import { Heading } from '../components/Heading.tsx';
 import { Input } from '../components/Input.tsx';
 import { Button } from '../components/Button.tsx';
-import { SignedIn, SignedOut, LoginButton, LogoutButton, useAuth } from '@kobbleio/react';
+import { SignedIn, SignedOut, LoginButton, LogoutButton, useAuth, IsAllowed, IsForbidden } from '@kobbleio/react';
 import { useSupabaseContext } from '../context/SupabaseContext.tsx';
 import { useEffect, useState } from 'react';
 import { ImageCard } from '../components/ImageCard.tsx';
 import { LoadingFrame } from '../components/LoadingFrame.tsx';
 import { User } from '@kobbleio/react';
 import { GithubLink } from '../components/GithubLink.tsx';
+import { EmptyState } from '../components/EmptyState.tsx';
+import { QuotaUsage } from '../components/QuotaUsage.tsx';
 
 type ImageResult = { id: number; url: string };
 
@@ -76,10 +78,11 @@ const Home = () => {
 		<div className="flex flex-col justify-between items-center w-full pb-20">
 			<SignedIn>
 				<header className={'fixed top-0 right-0 left-0 h-[50px] p-10 flex items-center justify-end gap-2'}>
+					<GithubLink />
 					<LogoutButton>
 						<Button>Logout</Button>
 					</LogoutButton>
-					<GithubLink />
+					<QuotaUsage />
 				</header>
 				<main className="py-20">
 					<Heading />
@@ -87,6 +90,10 @@ const Home = () => {
 					{isFetching && <LoadingFrame text={'Fetching images...'} />}
 
 					{isCreating && <LoadingFrame text={'Generating image...'} />}
+
+					{!isFetching && !isCreating && images.length === 0 && (
+						<EmptyState text={'No images found. Generate your first image using the input below 🖼️'} />
+					)}
 
 					{images?.map((image) => <ImageCard key={image.id} url={image.url} />)}
 				</main>
@@ -106,7 +113,12 @@ const Home = () => {
 								</LoginButton>
 							</SignedOut>
 							<SignedIn>
-								<Button onClick={generateImage}>Generate image</Button>
+								<IsAllowed quota={'image-generated'}>
+									<Button onClick={generateImage}>Generate image</Button>
+								</IsAllowed>
+								<IsForbidden quota={'image-generated'}>
+									<span>You've reach your image generation quota</span>
+								</IsForbidden>
 								<Button onClick={refresh}>Refresh</Button>
 							</SignedIn>
 						</div>
